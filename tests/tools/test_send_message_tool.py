@@ -32,6 +32,30 @@ def _install_telegram_mock(monkeypatch, bot):
     monkeypatch.setitem(sys.modules, "telegram.constants", constants_mod)
 
 
+def _ensure_slack_mock(monkeypatch):
+    if "slack_bolt" in sys.modules and hasattr(sys.modules["slack_bolt"], "__file__"):
+        return
+
+    slack_bolt = MagicMock()
+    slack_bolt.async_app.AsyncApp = MagicMock
+    slack_bolt.adapter.socket_mode.async_handler.AsyncSocketModeHandler = MagicMock
+
+    slack_sdk = MagicMock()
+    slack_sdk.web.async_client.AsyncWebClient = MagicMock
+
+    for name, mod in [
+        ("slack_bolt", slack_bolt),
+        ("slack_bolt.async_app", slack_bolt.async_app),
+        ("slack_bolt.adapter", slack_bolt.adapter),
+        ("slack_bolt.adapter.socket_mode", slack_bolt.adapter.socket_mode),
+        ("slack_bolt.adapter.socket_mode.async_handler", slack_bolt.adapter.socket_mode.async_handler),
+        ("slack_sdk", slack_sdk),
+        ("slack_sdk.web", slack_sdk.web),
+        ("slack_sdk.web.async_client", slack_sdk.web.async_client),
+    ]:
+        monkeypatch.setitem(sys.modules, name, mod)
+
+
 class TestSendMessageTool:
     def test_cron_duplicate_target_is_skipped_and_explained(self):
         home = SimpleNamespace(chat_id="-1001")
@@ -426,7 +450,7 @@ class TestSendToPlatformChunking:
             result = asyncio.run(
                 _send_to_platform(
                     Platform.DISCORD,
-                    SimpleNamespace(enabled=True, token="tok", extra={}),
+                    SimpleNamespace(enabled=True, token="***", extra={}),
                     "ch", long_msg,
                 )
             )
@@ -435,8 +459,33 @@ class TestSendToPlatformChunking:
         for call in send.await_args_list:
             assert len(call.args[2]) <= 2020  # each chunk fits the limit
 
+    def test_slack_messages_are_formatted_before_send(self, monkeypatch):
+        _ensure_slack_mock(monkeypatch)
+
+        import gateway.platforms.slack as slack_mod
+
+        monkeypatch.setattr(slack_mod, "SLACK_AVAILABLE", True)
+        send = AsyncMock(return_value={"success": True, "message_id": "1"})
+
+        with patch("tools.send_message_tool._send_slack", send):
+            result = asyncio.run(
+                _send_to_platform(
+                    Platform.SLACK,
+                    SimpleNamespace(enabled=True, token="***", extra={}),
+                    "C123",
+                    "**hello** from [Hermes](<https://example.com>)",
+                )
+            )
+
+        assert result["success"] is True
+        send.assert_awaited_once_with(
+            "***",
+            "C123",
+            "*hello* from <https://example.com|Hermes>",
+        )
+
     def test_telegram_media_attaches_to_last_chunk(self):
-        """When chunked, media files are sent only with the last chunk."""
+
         sent_calls = []
 
         async def fake_send(token, chat_id, message, media_files=None, thread_id=None):

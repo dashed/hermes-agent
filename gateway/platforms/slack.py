@@ -247,6 +247,7 @@ class SlackAdapter(BasePlatformAdapter):
                 kwargs = {
                     "channel": chat_id,
                     "text": chunk,
+                    "mrkdwn": True,
                 }
                 if thread_ts:
                     kwargs["thread_ts"] = thread_ts
@@ -410,13 +411,31 @@ class SlackAdapter(BasePlatformAdapter):
         text = re.sub(r'(`[^`]+`)', lambda m: _ph(m.group(0)), text)
 
         # 3) Convert markdown links [text](url) → <url|text>
+        def _convert_markdown_link(m):
+            label = m.group(1)
+            url = m.group(2).strip()
+            if url.startswith('<') and url.endswith('>'):
+                url = url[1:-1].strip()
+            return _ph(f'<{url}|{label}>')
+
         text = re.sub(
             r'\[([^\]]+)\]\(([^)]+)\)',
-            lambda m: _ph(f'<{m.group(2)}|{m.group(1)}>'),
+            _convert_markdown_link,
             text,
         )
 
-        # 4) Convert headers (## Title) → *Title* (bold)
+        # 4) Protect existing Slack entities/manual links so escaping and later
+        #    formatting passes don't break them.
+        text = re.sub(
+            r'(<(?:[@#!]|(?:https?|mailto|tel):)[^>\n]+>)',
+            lambda m: _ph(m.group(1)),
+            text,
+        )
+
+        # 5) Escape Slack control characters in remaining plain text.
+        text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        # 6) Convert headers (## Title) → *Title* (bold)
         def _convert_header(m):
             inner = m.group(1).strip()
             # Strip redundant bold markers inside a header

@@ -617,6 +617,18 @@ class TestFormatMessage:
         result = adapter.format_message("[click here](https://example.com)")
         assert result == "<https://example.com|click here>"
 
+    def test_link_conversion_strips_markdown_angle_brackets(self, adapter):
+        result = adapter.format_message("[click here](<https://example.com>)")
+        assert result == "<https://example.com|click here>"
+
+    def test_escapes_control_characters(self, adapter):
+        result = adapter.format_message("AT&T < 5 > 3")
+        assert result == "AT&amp;T &lt; 5 &gt; 3"
+
+    def test_preserves_existing_slack_entities(self, adapter):
+        text = "Hey <@U123>, see <https://example.com|example> and <!here>"
+        assert adapter.format_message(text) == text
+
     def test_strikethrough(self, adapter):
         assert adapter.format_message("~~deleted~~") == "~deleted~"
 
@@ -974,6 +986,13 @@ class TestMessageSplitting:
         )
         await adapter.send("C123", "hello world")
         assert adapter._app.client.chat_postMessage.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_send_explicitly_enables_mrkdwn(self, adapter):
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "ts1"})
+        await adapter.send("C123", "**hello**")
+        kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert kwargs.get("mrkdwn") is True
 
 
 # ---------------------------------------------------------------------------
