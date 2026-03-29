@@ -484,6 +484,26 @@ class TestSendToPlatformChunking:
             "*hello* from <https://example.com|Hermes>",
         )
 
+    def test_slack_bold_italic_formatted_before_send(self, monkeypatch):
+        """Bold+italic ***text*** survives tool-layer formatting."""
+        _ensure_slack_mock(monkeypatch)
+        import gateway.platforms.slack as slack_mod
+
+        monkeypatch.setattr(slack_mod, "SLACK_AVAILABLE", True)
+        send = AsyncMock(return_value={"success": True, "message_id": "1"})
+        with patch("tools.send_message_tool._send_slack", send):
+            result = asyncio.run(
+                _send_to_platform(
+                    Platform.SLACK,
+                    SimpleNamespace(enabled=True, token="***", extra={}),
+                    "C123",
+                    "***important*** update",
+                )
+            )
+        assert result["success"] is True
+        sent_text = send.await_args.args[2]
+        assert "*_important_*" in sent_text
+
     def test_slack_blockquote_formatted_before_send(self, monkeypatch):
         """Blockquote '>' markers must survive formatting (not escaped to '&gt;')."""
         _ensure_slack_mock(monkeypatch)

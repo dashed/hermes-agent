@@ -687,6 +687,29 @@ class TestFormatMessage:
         assert result.startswith(">")
         assert "`fmt.Println`" in result
 
+    def test_bold_italic_combined(self, adapter):
+        """Triple-star ***text*** converts to Slack bold+italic *_text_*."""
+        assert adapter.format_message("***hello***") == "*_hello_*"
+
+    def test_bold_italic_with_surrounding_text(self, adapter):
+        """Bold+italic in a sentence."""
+        result = adapter.format_message("This is ***important*** stuff")
+        assert "*_important_*" in result
+
+    def test_bold_italic_does_not_break_plain_bold(self, adapter):
+        """**bold** still works after adding ***bold italic*** support."""
+        assert adapter.format_message("**bold**") == "*bold*"
+
+    def test_bold_italic_does_not_break_plain_italic(self, adapter):
+        """*italic* still works after adding ***bold italic*** support."""
+        assert adapter.format_message("*italic*") == "_italic_"
+
+    def test_bold_italic_mixed_with_bold(self, adapter):
+        """Both ***bold italic*** and **bold** in the same message."""
+        result = adapter.format_message("***important*** and **bold**")
+        assert "*_important_*" in result
+        assert "*bold*" in result
+
 
 # ---------------------------------------------------------------------------
 # TestEditMessage
@@ -807,6 +830,14 @@ class TestEditMessageStreamingPipeline:
 
         # Total edit count should match number of updates
         assert adapter._app.client.chat_update.call_count == len(updates)
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_bold_italic(self, adapter):
+        """Bold+italic ***text*** is formatted as *_text_* in edited messages."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "ts1", "***important*** update")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert "*_important_*" in kwargs["text"]
 
     @pytest.mark.asyncio
     async def test_edit_message_not_connected(self, adapter):
@@ -1159,6 +1190,14 @@ class TestMessageSplitting:
         sent_text = kwargs["text"]
         assert sent_text.startswith("> quoted text")
         assert "normal text" in sent_text
+
+    @pytest.mark.asyncio
+    async def test_send_formats_bold_italic(self, adapter):
+        """Bold+italic ***text*** is formatted as *_text_* in sent messages."""
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "ts1"})
+        await adapter.send("C123", "***important*** update")
+        kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert "*_important_*" in kwargs["text"]
 
     @pytest.mark.asyncio
     async def test_send_explicitly_enables_mrkdwn(self, adapter):

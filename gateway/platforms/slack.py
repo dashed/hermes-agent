@@ -447,31 +447,38 @@ class SlackAdapter(BasePlatformAdapter):
             r'^#{1,6}\s+(.+)$', _convert_header, text, flags=re.MULTILINE
         )
 
-        # 8) Convert bold: **text** → *text* (Slack bold)
+        # 8) Convert bold+italic: ***text*** → *_text_* (Slack bold wrapping italic)
+        text = re.sub(
+            r'\*\*\*(.+?)\*\*\*',
+            lambda m: _ph(f'*_{m.group(1)}_*'),
+            text,
+        )
+
+        # 9) Convert bold: **text** → *text* (Slack bold)
         text = re.sub(
             r'\*\*(.+?)\*\*',
             lambda m: _ph(f'*{m.group(1)}*'),
             text,
         )
 
-        # 9) Convert italic: _text_ stays as _text_ (already Slack italic)
-        #    Single *text* → _text_ (Slack italic)
+        # 10) Convert italic: _text_ stays as _text_ (already Slack italic)
+        #     Single *text* → _text_ (Slack italic)
         text = re.sub(
             r'(?<!\*)\*([^*\n]+)\*(?!\*)',
             lambda m: _ph(f'_{m.group(1)}_'),
             text,
         )
 
-        # 10) Convert strikethrough: ~~text~~ → ~text~
+        # 11) Convert strikethrough: ~~text~~ → ~text~
         text = re.sub(
             r'~~(.+?)~~',
             lambda m: _ph(f'~{m.group(1)}~'),
             text,
         )
 
-        # 11) Blockquotes: > prefix is already protected by step 5 above.
+        # 12) Blockquotes: > prefix is already protected by step 5 above.
 
-        # 12) Restore placeholders in reverse order
+        # 13) Restore placeholders in reverse order
         for key in reversed(list(placeholders.keys())):
             text = text.replace(key, placeholders[key])
 
