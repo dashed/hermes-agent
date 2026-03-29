@@ -481,7 +481,7 @@ class SlackAdapter(BasePlatformAdapter):
         # 12) Blockquotes: > prefix is already protected by step 5 above.
 
         # 13) Restore placeholders in reverse order
-        for key in reversed(list(placeholders.keys())):
+        for key in reversed(placeholders):
             text = text.replace(key, placeholders[key])
 
         return text
