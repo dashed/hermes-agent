@@ -653,6 +653,40 @@ class TestFormatMessage:
     def test_none_passthrough(self, adapter):
         assert adapter.format_message(None) is None
 
+    def test_blockquote_preserved(self, adapter):
+        """Single-line blockquote > marker is preserved."""
+        assert adapter.format_message("> quoted text") == "> quoted text"
+
+    def test_multiline_blockquote(self, adapter):
+        """Multi-line blockquote preserves > on each line."""
+        text = "> line one\n> line two"
+        assert adapter.format_message(text) == "> line one\n> line two"
+
+    def test_blockquote_with_formatting(self, adapter):
+        """Blockquote containing bold text."""
+        assert adapter.format_message("> **bold quote**") == "> *bold quote*"
+
+    def test_nested_blockquote(self, adapter):
+        """Multiple > characters for nested quotes."""
+        assert adapter.format_message(">> deeply quoted") == ">> deeply quoted"
+
+    def test_blockquote_mixed_with_plain(self, adapter):
+        """Blockquote lines interleaved with plain text."""
+        text = "normal\n> quoted\nnormal again"
+        result = adapter.format_message(text)
+        assert "> quoted" in result
+        assert "normal" in result
+
+    def test_non_prefix_gt_still_escaped(self, adapter):
+        """Greater-than in mid-line is still escaped."""
+        assert adapter.format_message("5 > 3") == "5 &gt; 3"
+
+    def test_blockquote_with_code(self, adapter):
+        """Blockquote containing inline code."""
+        result = adapter.format_message("> use `fmt.Println`")
+        assert result.startswith(">")
+        assert "`fmt.Println`" in result
+
 
 # ---------------------------------------------------------------------------
 # TestReactions
@@ -986,6 +1020,16 @@ class TestMessageSplitting:
         )
         await adapter.send("C123", "hello world")
         assert adapter._app.client.chat_postMessage.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_send_preserves_blockquote_formatting(self, adapter):
+        """Blockquote '>' markers must survive format → chunk → send pipeline."""
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "ts1"})
+        await adapter.send("C123", "> quoted text\nnormal text")
+        kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
+        sent_text = kwargs["text"]
+        assert sent_text.startswith("> quoted text")
+        assert "normal text" in sent_text
 
     @pytest.mark.asyncio
     async def test_send_explicitly_enables_mrkdwn(self, adapter):

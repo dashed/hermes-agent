@@ -484,6 +484,28 @@ class TestSendToPlatformChunking:
             "*hello* from <https://example.com|Hermes>",
         )
 
+    def test_slack_blockquote_formatted_before_send(self, monkeypatch):
+        """Blockquote '>' markers must survive formatting (not escaped to '&gt;')."""
+        _ensure_slack_mock(monkeypatch)
+        import gateway.platforms.slack as slack_mod
+
+        monkeypatch.setattr(slack_mod, "SLACK_AVAILABLE", True)
+        send = AsyncMock(return_value={"success": True, "message_id": "1"})
+        with patch("tools.send_message_tool._send_slack", send):
+            result = asyncio.run(
+                _send_to_platform(
+                    Platform.SLACK,
+                    SimpleNamespace(enabled=True, token="***", extra={}),
+                    "C123",
+                    "> important quote\n\nnormal text & stuff",
+                )
+            )
+        assert result["success"] is True
+        sent_text = send.await_args.args[2]
+        assert sent_text.startswith("> important quote")
+        assert "&amp;" in sent_text  # & is escaped
+        assert "&gt;" not in sent_text.split("\n")[0]  # > in blockquote is NOT escaped
+
     def test_telegram_media_attaches_to_last_chunk(self):
 
         sent_calls = []
