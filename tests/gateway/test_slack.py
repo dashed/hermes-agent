@@ -689,6 +689,135 @@ class TestFormatMessage:
 
 
 # ---------------------------------------------------------------------------
+# TestEditMessage
+# ---------------------------------------------------------------------------
+
+
+class TestEditMessage:
+    """Verify that edit_message() applies mrkdwn formatting before sending."""
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_bold(self, adapter):
+        """edit_message converts **bold** to Slack *bold*."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "1234.5678", "**hello world**")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"] == "*hello world*"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_links(self, adapter):
+        """edit_message converts markdown links to Slack format."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "1234.5678", "[click](https://example.com)")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"] == "<https://example.com|click>"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_preserves_blockquotes(self, adapter):
+        """edit_message preserves blockquote > markers."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "1234.5678", "> quoted text")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"] == "> quoted text"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_escapes_control_chars(self, adapter):
+        """edit_message escapes & < > in plain text."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "1234.5678", "AT&T < 5 > 3")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"] == "AT&amp;T &lt; 5 &gt; 3"
+
+
+# ---------------------------------------------------------------------------
+# TestEditMessageStreamingPipeline
+# ---------------------------------------------------------------------------
+
+
+class TestEditMessageStreamingPipeline:
+    """E2E: verify that sequential streaming edits all go through format_message.
+
+    Simulates the GatewayStreamConsumer pattern where edit_message is called
+    repeatedly with progressively longer accumulated text.  Every call must
+    produce properly formatted mrkdwn in the chat_update payload.
+    """
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_streaming_updates(self, adapter):
+        """Simulates streaming: multiple edits, each should be formatted."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+
+        # First streaming update — bold
+        result1 = await adapter.edit_message("C123", "ts1", "**Processing**...")
+        assert result1.success is True
+        kwargs1 = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs1["text"] == "*Processing*..."
+
+        # Second streaming update — bold + link
+        result2 = await adapter.edit_message(
+            "C123", "ts1", "**Done!** See [results](https://example.com)"
+        )
+        assert result2.success is True
+        kwargs2 = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs2["text"] == "*Done!* See <https://example.com|results>"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_code_and_bold(self, adapter):
+        """Streaming update with code block and bold — code must be preserved."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+
+        content = "**Result:**\n```python\nprint('hello')\n```"
+        result = await adapter.edit_message("C123", "ts1", content)
+        assert result.success is True
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"].startswith("*Result:*")
+        assert "```python\nprint('hello')\n```" in kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_blockquote_in_stream(self, adapter):
+        """Streaming update with blockquote — '>' marker must survive."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+
+        content = "> **Important:** do this\nnormal line"
+        result = await adapter.edit_message("C123", "ts1", content)
+        assert result.success is True
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert kwargs["text"].startswith("> *Important:*")
+        assert "normal line" in kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_progressive_accumulation(self, adapter):
+        """Simulate real streaming: text grows with each edit, all formatted."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+
+        updates = [
+            ("**Step 1**", "*Step 1*"),
+            ("**Step 1**\n**Step 2**", "*Step 1*\n*Step 2*"),
+            (
+                "**Step 1**\n**Step 2**\nSee [docs](https://docs.example.com)",
+                "*Step 1*\n*Step 2*\nSee <https://docs.example.com|docs>",
+            ),
+        ]
+
+        for raw, expected in updates:
+            result = await adapter.edit_message("C123", "ts1", raw)
+            assert result.success is True
+            kwargs = adapter._app.client.chat_update.call_args.kwargs
+            assert kwargs["text"] == expected, f"Failed for input: {raw!r}"
+
+        # Total edit count should match number of updates
+        assert adapter._app.client.chat_update.call_count == len(updates)
+
+    @pytest.mark.asyncio
+    async def test_edit_message_not_connected(self, adapter):
+        """edit_message returns failure when adapter is not connected."""
+        adapter._app = None
+        result = await adapter.edit_message("C123", "ts1", "**hello**")
+        assert result.success is False
+        assert "Not connected" in result.error
+
+
+# ---------------------------------------------------------------------------
 # TestReactions
 # ---------------------------------------------------------------------------
 
