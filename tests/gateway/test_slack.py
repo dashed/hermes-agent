@@ -710,6 +710,30 @@ class TestFormatMessage:
         assert "*_important_*" in result
         assert "*bold*" in result
 
+    def test_pre_escaped_ampersand_not_double_escaped(self, adapter):
+        """Already-escaped &amp; must not become &amp;amp;."""
+        assert adapter.format_message("&amp;") == "&amp;"
+
+    def test_pre_escaped_lt_not_double_escaped(self, adapter):
+        """Already-escaped &lt; must not become &amp;lt;."""
+        assert adapter.format_message("&lt;") == "&lt;"
+
+    def test_pre_escaped_gt_not_double_escaped(self, adapter):
+        """Already-escaped &gt; in plain text must not become &amp;gt;."""
+        assert adapter.format_message("5 &gt; 3") == "5 &gt; 3"
+
+    def test_mixed_raw_and_escaped_entities(self, adapter):
+        """Raw & and pre-escaped &amp; coexist correctly."""
+        result = adapter.format_message("AT&T and &amp; entity")
+        assert result == "AT&amp;T and &amp; entity"
+
+    def test_escaping_is_idempotent(self, adapter):
+        """Formatting already-formatted text produces the same result."""
+        original = "AT&T < 5 > 3"
+        once = adapter.format_message(original)
+        twice = adapter.format_message(once)
+        assert once == twice
+
 
 # ---------------------------------------------------------------------------
 # TestEditMessage
@@ -838,6 +862,17 @@ class TestEditMessageStreamingPipeline:
         await adapter.edit_message("C123", "ts1", "***important*** update")
         kwargs = adapter._app.client.chat_update.call_args.kwargs
         assert "*_important_*" in kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_edit_message_does_not_double_escape(self, adapter):
+        """Pre-escaped entities in edited messages must not get double-escaped."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "ts1", "5 &gt; 3 and &amp; entity")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert "&amp;gt;" not in kwargs["text"]
+        assert "&amp;amp;" not in kwargs["text"]
+        assert "&gt;" in kwargs["text"]
+        assert "&amp;" in kwargs["text"]
 
     @pytest.mark.asyncio
     async def test_edit_message_not_connected(self, adapter):
@@ -1205,6 +1240,15 @@ class TestMessageSplitting:
         await adapter.send("C123", "**hello**")
         kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
         assert kwargs.get("mrkdwn") is True
+
+    @pytest.mark.asyncio
+    async def test_send_does_not_double_escape_entities(self, adapter):
+        """Pre-escaped &amp; in sent messages must not become &amp;amp;."""
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "ts1"})
+        await adapter.send("C123", "Use &amp; for ampersand")
+        kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert "&amp;amp;" not in kwargs["text"]
+        assert "&amp;" in kwargs["text"]
 
 
 # ---------------------------------------------------------------------------

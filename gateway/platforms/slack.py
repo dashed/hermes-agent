@@ -434,6 +434,8 @@ class SlackAdapter(BasePlatformAdapter):
         text = re.sub(r'^(>+\s)', lambda m: _ph(m.group(0)), text, flags=re.MULTILINE)
 
         # 6) Escape Slack control characters in remaining plain text.
+        # Unescape first so already-escaped input doesn't get double-escaped.
+        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
         text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
         # 7) Convert headers (## Title) → *Title* (bold)
