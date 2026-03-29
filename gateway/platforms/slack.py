@@ -417,7 +417,7 @@ class SlackAdapter(BasePlatformAdapter):
             return _ph(f'<{url}|{label}>')
 
         text = re.sub(
-            r'\[([^\]]+)\]\(([^)]+)\)',
+            r'\[([^\]]+)\]\(([^()]*(?:\([^()]*\)[^()]*)*)\)',
             _convert_markdown_link,
             text,
         )

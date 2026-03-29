@@ -727,12 +727,94 @@ class TestFormatMessage:
         result = adapter.format_message("AT&T and &amp; entity")
         assert result == "AT&amp;T and &amp; entity"
 
+    def test_link_with_parentheses_in_url(self, adapter):
+        """Wikipedia-style URL with balanced parens is not truncated."""
+        result = adapter.format_message("[Foo](https://en.wikipedia.org/wiki/Foo_(bar))")
+        assert result == "<https://en.wikipedia.org/wiki/Foo_(bar)|Foo>"
+
+    def test_link_with_multiple_paren_pairs(self, adapter):
+        """URL with multiple balanced paren pairs."""
+        result = adapter.format_message("[text](https://example.com/a_(b)_c_(d))")
+        assert result == "<https://example.com/a_(b)_c_(d)|text>"
+
+    def test_link_without_parens_still_works(self, adapter):
+        """Normal URL without parens is unaffected by regex change."""
+        result = adapter.format_message("[click](https://example.com/path?q=1)")
+        assert result == "<https://example.com/path?q=1|click>"
+
+    def test_link_with_angle_brackets_and_parens(self, adapter):
+        """Angle-bracket URL with parens (CommonMark syntax)."""
+        result = adapter.format_message("[Foo](<https://en.wikipedia.org/wiki/Foo_(bar)>)")
+        assert result == "<https://en.wikipedia.org/wiki/Foo_(bar)|Foo>"
+
     def test_escaping_is_idempotent(self, adapter):
         """Formatting already-formatted text produces the same result."""
         original = "AT&T < 5 > 3"
         once = adapter.format_message(original)
         twice = adapter.format_message(once)
         assert once == twice
+
+    # --- Entity preservation (spec-compliance) ---
+
+    def test_channel_mention_preserved(self, adapter):
+        """<!channel> special mention passes through unchanged."""
+        assert adapter.format_message("Attention <!channel>") == "Attention <!channel>"
+
+    def test_everyone_mention_preserved(self, adapter):
+        """<!everyone> special mention passes through unchanged."""
+        assert adapter.format_message("Hey <!everyone>") == "Hey <!everyone>"
+
+    def test_subteam_mention_preserved(self, adapter):
+        """<!subteam^ID> user group mention passes through unchanged."""
+        assert adapter.format_message("Paging <!subteam^S12345>") == "Paging <!subteam^S12345>"
+
+    def test_date_formatting_preserved(self, adapter):
+        """<!date^...> formatting token passes through unchanged."""
+        text = "Posted <!date^1392734382^{date_pretty}|Feb 18, 2014>"
+        assert adapter.format_message(text) == text
+
+    def test_channel_link_preserved(self, adapter):
+        """<#CHANNEL_ID> channel link passes through unchanged."""
+        assert adapter.format_message("Join <#C12345>") == "Join <#C12345>"
+
+    # --- Additional edge cases ---
+
+    def test_message_only_code_block(self, adapter):
+        """Entire message is a fenced code block — no conversion."""
+        code = "```python\nx = 1\n```"
+        assert adapter.format_message(code) == code
+
+    def test_multiline_mixed_formatting(self, adapter):
+        """Multi-line message with headers, bold, links, code, and blockquotes."""
+        text = "## Title\n**bold** and [link](https://x.com)\n> quote\n`code`"
+        result = adapter.format_message(text)
+        assert result.startswith("*Title*")
+        assert "*bold*" in result
+        assert "<https://x.com|link>" in result
+        assert "> quote" in result
+        assert "`code`" in result
+
+    def test_markdown_unordered_list_with_asterisk(self, adapter):
+        """Asterisk list items must not trigger italic conversion."""
+        text = "* item one\n* item two"
+        result = adapter.format_message(text)
+        assert "item one" in result
+        assert "item two" in result
+
+    def test_nested_bold_in_link(self, adapter):
+        """Bold inside link label — label is stashed before bold pass."""
+        result = adapter.format_message("[**bold**](https://example.com)")
+        assert "https://example.com" in result
+        assert "bold" in result
+
+    def test_url_with_query_string_and_ampersand(self, adapter):
+        """Ampersand in URL query string must not be escaped."""
+        result = adapter.format_message("[link](https://x.com?a=1&b=2)")
+        assert result == "<https://x.com?a=1&b=2|link>"
+
+    def test_emoji_shortcodes_passthrough(self, adapter):
+        """Emoji shortcodes like :smile: pass through unchanged."""
+        assert adapter.format_message(":smile: hello :wave:") == ":smile: hello :wave:"
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +955,14 @@ class TestEditMessageStreamingPipeline:
         assert "&amp;amp;" not in kwargs["text"]
         assert "&gt;" in kwargs["text"]
         assert "&amp;" in kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_edit_message_formats_url_with_parens(self, adapter):
+        """Wikipedia-style URL with parens survives edit pipeline."""
+        adapter._app.client.chat_update = AsyncMock(return_value={"ok": True})
+        await adapter.edit_message("C123", "ts1", "See [Foo](https://en.wikipedia.org/wiki/Foo_(bar))")
+        kwargs = adapter._app.client.chat_update.call_args.kwargs
+        assert "<https://en.wikipedia.org/wiki/Foo_(bar)|Foo>" in kwargs["text"]
 
     @pytest.mark.asyncio
     async def test_edit_message_not_connected(self, adapter):
@@ -1249,6 +1339,14 @@ class TestMessageSplitting:
         kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
         assert "&amp;amp;" not in kwargs["text"]
         assert "&amp;" in kwargs["text"]
+
+    @pytest.mark.asyncio
+    async def test_send_formats_url_with_parens(self, adapter):
+        """Wikipedia-style URL with parens survives send pipeline."""
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "ts1"})
+        await adapter.send("C123", "See [Foo](https://en.wikipedia.org/wiki/Foo_(bar))")
+        kwargs = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert "<https://en.wikipedia.org/wiki/Foo_(bar)|Foo>" in kwargs["text"]
 
 
 # ---------------------------------------------------------------------------
