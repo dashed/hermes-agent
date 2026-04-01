@@ -5,6 +5,7 @@ Shows the status of all Hermes Agent components.
 """
 
 import os
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -307,23 +308,37 @@ def show_status(args):
     print(color("◆ Gateway Service", Colors.CYAN, Colors.BOLD))
     
     if sys.platform.startswith('linux'):
-        try:
-            from hermes_cli.gateway import get_service_name
-            _gw_svc = get_service_name()
-        except Exception:
-            _gw_svc = "hermes-gateway"
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", _gw_svc],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            is_active = result.stdout.strip() == "active"
-        except subprocess.TimeoutExpired:
-            is_active = False
-        print(f"  Status:       {check_mark(is_active)} {'running' if is_active else 'stopped'}")
-        print("  Manager:      systemd (user)")
+        # Detect container environment (no systemd)
+        _in_container = (
+            os.environ.get("KUBERNETES_SERVICE_HOST")
+            or not shutil.which("systemctl")
+        )
+        if _in_container:
+            try:
+                from gateway.status import is_gateway_running
+                _gw_running = is_gateway_running()
+            except Exception:
+                _gw_running = False
+            print(f"  Status:       {check_mark(_gw_running)} {'running' if _gw_running else 'stopped'}")
+            print("  Manager:      container/K8s")
+        else:
+            try:
+                from hermes_cli.gateway import get_service_name
+                _gw_svc = get_service_name()
+            except Exception:
+                _gw_svc = "hermes-gateway"
+            try:
+                result = subprocess.run(
+                    ["systemctl", "--user", "is-active", _gw_svc],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                is_active = result.stdout.strip() == "active"
+            except subprocess.TimeoutExpired:
+                is_active = False
+            print(f"  Status:       {check_mark(is_active)} {'running' if is_active else 'stopped'}")
+            print("  Manager:      systemd (user)")
         
     elif sys.platform == 'darwin':
         from hermes_cli.gateway import get_launchd_label

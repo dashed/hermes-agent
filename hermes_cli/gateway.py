@@ -231,6 +231,10 @@ def is_macos() -> bool:
 def is_windows() -> bool:
     return sys.platform == 'win32'
 
+def _is_container_env() -> bool:
+    """Detect container/K8s environment where systemd is unavailable."""
+    return bool(os.environ.get("KUBERNETES_SERVICE_HOST") or not shutil.which("systemctl"))
+
 
 # =============================================================================
 # Service Configuration
@@ -875,6 +879,24 @@ def systemd_restart(system: bool = False):
 
 
 def systemd_status(deep: bool = False, system: bool = False):
+    if _is_container_env():
+        try:
+            from gateway.status import is_gateway_running, read_runtime_status
+            _running = is_gateway_running()
+            print(f"Gateway service: {'running' if _running else 'stopped'} (container/K8s)")
+            # Show runtime health details if available
+            _state = read_runtime_status()
+            if _state:
+                gw_state = _state.get("gateway_state", "unknown")
+                print(f"  Runtime state: {gw_state}")
+                platforms = _state.get("platforms", {})
+                for pname, pstate in platforms.items():
+                    status = pstate.get("status", "unknown")
+                    print(f"  Platform {pname}: {status}")
+        except Exception:
+            print("Gateway service: unknown (container/K8s, status check failed)")
+        return
+
     system = _select_systemd_scope(system)
     unit_path = get_systemd_unit_path(system=system)
     scope_flag = " --system" if system else ""
@@ -1741,6 +1763,9 @@ def _is_service_installed() -> bool:
 def _is_service_running() -> bool:
     """Check if the gateway service is currently running."""
     if is_linux():
+        if _is_container_env():
+            return False
+
         user_unit_exists = get_systemd_unit_path(system=False).exists()
         system_unit_exists = get_systemd_unit_path(system=True).exists()
 
